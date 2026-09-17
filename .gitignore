@@ -1,0 +1,7 @@
+# Editor and OS noise
+*~
+.*.sw?
+.DS_Store
+
+# In case the node harness ever grows a dependency
+node_modules/

@@ -1,0 +1,26 @@
+# ---------------------------------------------------------------------------
+# Fragment for ~/.procmailrc — tidy [External] tags out of Subject: at delivery.
+# ---------------------------------------------------------------------------
+
+SHELL=/bin/sh
+PATH=/usr/bin:/bin
+LOGFILE=$HOME/.procmail.log
+TIDY=$HOME/bin/tidy-subject.pl
+
+# --- safety net ------------------------------------------------------------
+# Keep an untouched copy of every message while you are testing. Delete this
+# recipe once you trust the filter. (Maildir syntax; use "backup" without the
+# trailing slash for mbox.)
+:0 c
+backup/
+
+# --- the rewrite -----------------------------------------------------------
+# f = filter, h = feed the headers only, w = wait and check the exit status.
+# The script always exits 0 and echoes its input unchanged on any internal
+# error, so a failure here degrades to "message delivered untouched" rather
+# than to lost mail.
+:0 fhw
+| $TIDY
+
+# Delivery then proceeds as normal — your existing recipes follow here, and
+# anything unmatched falls through to $DEFAULT.
