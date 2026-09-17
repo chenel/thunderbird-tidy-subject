@@ -100,23 +100,62 @@ Loading from disk now avoids the storage path entirely, so regexes would be safe
 again. Leaving the code as plain string scanning anyway: it is readable, it is
 tested, and it cannot regress this way.
 
+## Covering server-side-filed folders
+
+Established while working this out; recorded so it is not re-derived. The
+user-facing version is the README's *Covering folders other than the Inbox*.
+
+- The gate is `mFlags & nsMsgFolderFlags::Inbox || m_applyIncomingFilters` in
+  `nsImapMailFolder::UpdateFolderWithListener()`. The value comes from
+  `GetInheritedStringProperty("applyIncomingFilters", ...)` compared with
+  `EqualsLiteral("true")` — hence a **String** pref containing `true`. A Boolean
+  reads back empty and fails silently.
+- Because it is an *inherited* property, `mail.server.serverN.*` and
+  `mail.server.default.*` both work. Per-account is preferable; the switch is
+  account-wide and makes every filter in that account run on every folder, which
+  is only safe here because this profile has exactly one filter.
+- The run is `nsMsgFilterType::InboxRule`, which `type="17"` already carries, so
+  the filter definition needs no change.
+- **"Periodically" is a dead end.** The periodic runner only targets the Inbox
+  (bug 1602704, still open). The earlier note here was wrong twice: 0x80 is
+  `Archive`, `Periodic` is 0x100, and neither would have helped.
+- `check_all_folders_for_new` is needed too, or the folders are never polled and
+  nothing arrives to filter. It rides the biff timer, not IDLE, so it does not
+  change the user's check interval. It skips Junk and Trash; the Junk exclusion
+  was fixed only on the 145 branch (bug 1986092) and this profile is on 140.
+- The hook fires as headers are **downloaded**, so clicking into a folder of
+  already-known messages does nothing. Testing needs a genuine arrival.
+- Reading the filter log with more than one account is a trap: each account has
+  its own list, and a `Running 0 filters from ListN` line is likely a different
+  account's empty list rather than this filter failing.
+- `MOZ_LOG_FILE` has `.moz_log` appended by Gecko.
+
+Status: the filter log shows `Preparing filter run on folder '<non-Inbox>'` with
+the correct one-filter list, so the gate opens. Not yet observed end to end —
+that needs a new message to actually land in such a folder.
+
 ## Gotchas
 
 - `loadSubScript` **caches by URL**. After editing the file, restart Thunderbird
   or use `loadSubScriptWithOptions(url, {target: this, ignoreCache: true})`.
-- The script logs `tidy-subject: INVOKED, N header(s)` on every run regardless
-  of `DEBUG`; the absence of that line means the action never ran, and the count
-  separates "not invoked" from "invoked, given nothing". Everything else is
-  DEBUG-gated, including the readback that checks the write actually stuck.
+- The script logs `tidy-subject: INVOKED on <folder>, N header(s)` on every run
+  regardless of `DEBUG`. Absence of the line means the action never ran; the
+  count separates "not invoked" from "invoked, given nothing"; the folder name
+  says which folders the run reached, which is the measurement the open item
+  below needs. `fq_folderName` tries `localizedName`, `prettyName` and `name` in
+  turn because nsIMsgFolder has moved the display name between versions, and
+  deliberately avoids the folder URI, which carries username and host.
+  Everything else is DEBUG-gated, including the readback that checks the write
+  actually stuck.
 - Messages filed into other folders by **server-side rules** never reach the
-  Inbox, so `InboxRule` never sees them. They stay tagged until a manual run.
-  Unresolved — see below.
+  Inbox, so the Inbox-only filter run never sees them. Addressed by the two
+  preferences above; without those they stay tagged until a manual run.
 
 ## Open items
 
-- Cover server-side-filed folders. Options: periodic manual runs, or check
-  whether this Thunderbird version offers "Periodically" under *Apply filter
-  when* (would add 0x80 to the filter type).
+- Confirm the server-side-filed folder fix end to end: watch for an
+  `INVOKED on <folder>` line naming a non-Inbox folder when new mail next
+  arrives there. Everything up to that point is verified; see the section above.
 - Tag list needs extending as new institutional variants appear
   (`EXTERNAL_TAGS` at the top of the script).
 - Colleagues are using this too. Anyone who took the pre-`mime2DecodedSubject`

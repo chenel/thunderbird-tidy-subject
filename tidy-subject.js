@@ -180,6 +180,42 @@ function fq_readSubject(hdr) {
   return hdr.subject;
 }
 
+// --- naming the folder ------------------------------------------------------
+// Only for the log line. nsIMsgFolder has carried the display name under more
+// than one property across Thunderbird versions, so try them in turn rather
+// than pick one and be silently wrong. Deliberately NOT the folder URI: that
+// carries the username and host, and this line ends up pasted into bug reports.
+
+function fq_folderName(hdr) {
+  try {
+    var f = hdr.folder;
+    if (f) {
+      if (typeof f.localizedName === "string" && f.localizedName.length > 0) return f.localizedName;
+      if (typeof f.prettyName === "string" && f.prettyName.length > 0) return f.prettyName;
+      if (typeof f.name === "string" && f.name.length > 0) return f.name;
+    }
+  } catch (e) { /* fall through */ }
+  return "unnamed";
+}
+
+// A filter run is per-folder, so this is normally one name. It is written to
+// cope with more than one anyway: with applyIncomingFilters set, which folders
+// fire is the whole question, and a line that named only the first folder of
+// several would mislead in exactly the case it exists to diagnose.
+
+function fq_folderNames(list) {
+  var names = [];
+  for (var n = 0; n < list.length; n++) {
+    var nm = fq_folderName(list[n]);
+    var have = false;
+    for (var m = 0; m < names.length; m++) {
+      if (names[m] === nm) { have = true; break; }
+    }
+    if (!have) names.push(nm);
+  }
+  return names.join(", ");
+}
+
 // --- apply -----------------------------------------------------------------
 
 (function () {
@@ -197,8 +233,14 @@ function fq_readSubject(hdr) {
   // The one unconditional log line. With DEBUG off the script would otherwise
   // say nothing at all, and a filter that works looks exactly like a filter
   // that never ran. The header count distinguishes "not invoked" from
-  // "invoked, given nothing".
-  console.log('tidy-subject: INVOKED, ' + list.length + ' header(s)');
+  // "invoked, given nothing"; the folder name tells you which folders the run
+  // actually reached, which is what confirms or refutes applyIncomingFilters.
+  if (list.length > 0) {
+    console.log('tidy-subject: INVOKED on ' + fq_folderNames(list) +
+                ', ' + list.length + ' header(s)');
+  } else {
+    console.log('tidy-subject: INVOKED, 0 header(s) (no folder to name)');
+  }
 
   var changed = 0;
   for (var j = 0; j < list.length; j++) {

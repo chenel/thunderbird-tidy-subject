@@ -90,6 +90,91 @@ Services.scriptloader.loadSubScriptWithOptions(
   'file:///home/you/bin/tidy-subject.js', {target: this, ignoreCache: true});
 ```
 
+## Covering folders other than the Inbox
+
+By default Thunderbird runs incoming filters on the Inbox only. If your mail
+server files messages into other folders before you ever see them — an Exchange
+or Office 365 rule, a Sieve script — those messages never pass through the
+filter and stay tagged.
+
+Two hidden preferences fix this, both in *Settings → General → Config Editor*.
+Neither will be listed until you create it: per-account mail preferences do not
+appear until they differ from the `mail.server.default.*` branch, so "it isn't
+there" is expected rather than a sign the feature is gone.
+
+Find your account's number by searching `mail.server.server` and matching
+`.hostname` against your IMAP server. Then create both:
+
+| Preference | Type | Value |
+|---|---|---|
+| `mail.server.serverN.applyIncomingFilters` | **String** | `true` |
+| `mail.server.serverN.check_all_folders_for_new` | **Boolean** | true |
+
+**The types matter and the wrong one fails silently.** `applyIncomingFilters` is
+read as a string and compared against the literal text `true`, so a Boolean
+preference reads back empty, evaluates false, and reports nothing anywhere.
+
+They do different jobs and you need both:
+
+- `applyIncomingFilters` lets incoming filters run on folders besides the Inbox.
+  In Thunderbird's source it is one `||` — filters are prepared if the folder is
+  the Inbox **or** this property is set.
+- `check_all_folders_for_new` makes Thunderbird look at those folders at all.
+  Without it only the Inbox is polled, so an arrival elsewhere is never noticed
+  and no filter can run on it.
+
+Restart Thunderbird afterwards.
+
+### What this does not change
+
+- **Your check interval.** `check_all_folders_for_new` rides the existing
+  new-mail timer, widening the scope of each check rather than its frequency. If
+  you check hourly, other folders are checked hourly. The cost is more round
+  trips per check, negligible at that interval. It is unrelated to IMAP IDLE,
+  which covers only the folder you currently have selected.
+- **Your filter.** This path runs `InboxRule`-type filters, which is what
+  *Getting New Mail* already sets. Nothing in the filter needs editing.
+
+### Do not tick *Periodically*
+
+It looks like the answer and is not. The periodic runner only ever targets the
+Inbox ([bug 1602704](https://bugzilla.mozilla.org/show_bug.cgi?id=1602704), still
+open), so it cannot reach these folders. It will also re-run the filter on your
+Inbox on a timer, adding `INVOKED on Inbox` noise to the very log you would read
+to check whether any of this worked.
+
+### Junk folders, on Thunderbird before 145
+
+`check_all_folders_for_new` skips Junk and Trash. The Junk exclusion was fixed
+only on the 145 branch
+([bug 1986092](https://bugzilla.mozilla.org/show_bug.cgi?id=1986092); 140 and 144
+were marked wontfix). On 140, tagged mail filed into Junk still needs a manual
+run.
+
+### Checking that it worked
+
+New mail has to actually arrive. This hook fires as headers are downloaded, so
+clicking into a folder full of messages Thunderbird already knows about does
+nothing — there is no new message to filter, and that is not a failure.
+
+The arriving message does **not** need to carry a tag. The unconditional
+`INVOKED on <folder>` line appears whenever the script runs, so any arrival in a
+server-filed folder confirms the plumbing.
+
+For a view that does not depend on this script at all, start Thunderbird with
+its own filter logging:
+
+```
+MOZ_LOG=Filters:5 MOZ_LOG_FILE=/tmp/tb-filters.log thunderbird
+```
+
+Gecko appends `.moz_log`, so the file is `/tmp/tb-filters.log.moz_log` — looking
+for the name you typed is a good way to conclude wrongly that logging is off. A
+line reading `Preparing filter run on folder '<name>'` for a non-Inbox folder
+means `applyIncomingFilters` is in effect. If you have more than one account,
+note that each has its own filter list: a `Running 0 filters from ListN` line
+may simply be a different account's empty list, not your filter failing.
+
 ## Configuration
 
 At the top of `tidy-subject.js`:
@@ -116,21 +201,25 @@ filter manually.
 | What you see | What it means |
 |---|---|
 | Nothing at all | The action is not being invoked. Check that FiltaQuilla is enabled and not disabled by a Thunderbird update, and that the JavaScript Action pref is on — then restart. |
-| `INVOKED`, `0 header(s)` | The action runs but receives nothing. Check the filter's scope and conditions. |
+| `INVOKED, 0 header(s)` | The action runs but receives nothing. Check the filter's scope and conditions. |
+| `INVOKED on <folder>` naming only your Inbox | Expected until you set the two preferences in *Covering folders other than the Inbox*. |
 | Runs, but a message is skipped | Its tag is probably not in `EXTERNAL_TAGS`. Check the exact spelling. |
 | A `SyntaxError` | The script text is damaged — re-copy the file. |
 
-The script logs `INVOKED, N header(s)` on every run even with `DEBUG = false`,
-so the absence of that line is itself the diagnosis: the action never ran.
+The script logs `INVOKED on <folder>, N header(s)` on every run even with
+`DEBUG = false`, so the absence of that line is itself the diagnosis: the action
+never ran. The folder name is what tells you which folders a run actually
+reached, which matters because that is the project's main open limitation.
 Everything else — the per-message before and after, the readback that confirms
 the write stuck, and the final count — appears only with `DEBUG = true`.
 
 ## Known limitations
 
 - **Server-side rules.** Mail that your mail server files into a folder other
-  than the Inbox never passes through Thunderbird's incoming filters, so it
-  stays tagged. Run the filter manually on those folders, or check whether your
-  Thunderbird offers *Periodically* under *Apply filter when*.
+  than the Inbox does not pass through Thunderbird's incoming filters by
+  default, so it stays tagged. This is fixable — see *Covering folders other
+  than the Inbox*. On Thunderbird before 145 the Junk folder remains an
+  exception, and needs a manual run.
 - **FiltaQuilla is version-coupled.** It uses Experiment APIs, so a Thunderbird
   update can disable it outright.
 
