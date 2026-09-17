@@ -9,7 +9,7 @@ passes between institutions that each add their own tag.
 
 Context: nearly all of this user's mail is external (university research, highly
 collaborative), so the tag carries no signal and only trains them to ignore that
-part of the subject line. IT declined to make an exception.
+part of the subject line.
 
 ## Files
 
